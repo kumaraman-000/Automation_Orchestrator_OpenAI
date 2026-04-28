@@ -9,11 +9,12 @@ from dotenv import load_dotenv
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip().strip('"').strip("'")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-MAX_LOG_CHARS = 6000
-SUMMARY_MAX_CHARS = 1000
+MAX_LOG_CHARS = os.getenv("MAX_LOG_CHARS")
+
+SUMMARY_MAX_CHARS = os.getenv("SUMMARY_MAX_CHARS")
 
 
 def _required_env_value(name):
