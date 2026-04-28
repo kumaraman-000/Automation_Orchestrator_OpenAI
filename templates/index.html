@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Automation Orchestrator</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">QA Operations</p>
+        <h1>Automation Orchestrator</h1>
+      </div>
+      <div class="toolbar">
+        <span id="lastUpdated" class="last-updated">Waiting for status</span>
+        <button id="runAllButton" class="button button-primary" type="button" onclick="runAll(this)">Run All</button>
+      </div>
+    </header>
+
+    <section class="stats-grid" aria-label="Run summary">
+      <div class="stat stat-total">
+        <span class="stat-label">Total</span>
+        <strong id="totalCount">0</strong>
+      </div>
+      <div class="stat stat-running">
+        <span class="stat-label">Running</span>
+        <strong id="runningCount">0</strong>
+      </div>
+      <div class="stat stat-pass">
+        <span class="stat-label">Passed</span>
+        <strong id="passCount">0</strong>
+      </div>
+      <div class="stat stat-fail">
+        <span class="stat-label">Failed</span>
+        <strong id="failCount">0</strong>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>Test Scripts</h2>
+          <p>Execution status and failure triage</p>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Script</th>
+              <th>Status</th>
+              <th>Started</th>
+              <th>Ended</th>
+              <th>Jira</th>
+              <th class="action-col">Action</th>
+            </tr>
+          </thead>
+          <tbody id="statusTable">
+            <tr>
+              <td colspan="6" class="empty-state">Loading scripts...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div id="failureModal" class="modal" aria-hidden="true">
+    <div class="modal-backdrop" onclick="closeModal()"></div>
+    <section class="modal-content" role="dialog" aria-modal="true" aria-labelledby="failureTitle">
+      <header class="modal-header">
+        <div>
+          <p class="eyebrow">Failure Detail</p>
+          <h2 id="failureTitle">Test failure</h2>
+        </div>
+        <button class="icon-button" type="button" aria-label="Close failure detail" onclick="closeModal()">x</button>
+      </header>
+
+      <div class="detail-grid">
+        <article class="detail-block">
+          <span>Explanation</span>
+          <p id="summaryText">No explanation available.</p>
+        </article>
+        <article class="detail-block compact">
+          <span>Decision</span>
+          <p id="DecisionText">No decision available.</p>
+        </article>
+        <article class="detail-block">
+          <span>Jira Ticket</span>
+          <p id="ticketText">No Jira ticket information available.</p>
+        </article>
+      </div>
+
+      <img id="failureScreenshot" class="failure-screenshot" alt="Failure screenshot">
+
+      <details class="log-panel" open>
+        <summary>Execution Output</summary>
+        <pre id="failureText"></pre>
+      </details>
+    </section>
+  </div>
+
+  <script>
+    const statusTable = document.getElementById("statusTable");
+    const modal = document.getElementById("failureModal");
+
+    function statusClass(status) {
+      return String(status || "Pending").toLowerCase().replace(/\s+/g, "-");
+    }
+
+    function ticketLabel(ticket) {
+      if (!ticket) return "None";
+      if (ticket.includes("Jira ticket created")) return "Created";
+      if (ticket.includes("Failed") || ticket.includes("Error")) return "Error";
+      return ticket;
+    }
+
+    function updateStats(data) {
+      const values = Object.values(data);
+      document.getElementById("totalCount").textContent = values.length;
+      document.getElementById("runningCount").textContent = values.filter(item => item.status === "Running").length;
+      document.getElementById("passCount").textContent = values.filter(item => item.status === "Pass").length;
+      document.getElementById("failCount").textContent = values.filter(item => item.status === "Fail").length;
+      document.getElementById("lastUpdated").textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    }
+
+    function renderStatusRow(script, info) {
+      const currentStatus = String(info.status || "Pending");
+      const normalizedStatus = currentStatus.toLowerCase();
+      const isRunning = normalizedStatus === "running";
+      const row = document.createElement("tr");
+      row.className = `status-row row-${statusClass(info.status)}`;
+
+      const scriptCell = document.createElement("td");
+      scriptCell.className = "script-cell";
+      scriptCell.textContent = script;
+      row.appendChild(scriptCell);
+
+      const statusCell = document.createElement("td");
+      const badge = document.createElement("span");
+      badge.className = `status-badge status-${statusClass(info.status)}`;
+      badge.textContent = info.status || "Pending";
+      statusCell.appendChild(badge);
+      row.appendChild(statusCell);
+
+      const startCell = document.createElement("td");
+      startCell.textContent = info.start || "-";
+      row.appendChild(startCell);
+
+      const endCell = document.createElement("td");
+      endCell.textContent = info.end || "-";
+      row.appendChild(endCell);
+
+      const ticketCell = document.createElement("td");
+      ticketCell.textContent = ticketLabel(info.ticket);
+      row.appendChild(ticketCell);
+
+      const actionCell = document.createElement("td");
+      actionCell.className = "action-cell";
+
+      const runButton = document.createElement("button");
+      runButton.className = "button button-secondary";
+      runButton.type = "button";
+      runButton.textContent = isRunning ? "Running" : "Run";
+      runButton.disabled = isRunning;
+      runButton.addEventListener("click", event => {
+        event.stopPropagation();
+        runScript(script, runButton);
+      });
+      actionCell.appendChild(runButton);
+
+      if (normalizedStatus === "fail") {
+        const detailButton = document.createElement("button");
+        detailButton.className = "button button-ghost";
+        detailButton.type = "button";
+        detailButton.textContent = "Details";
+        detailButton.addEventListener("click", event => {
+          event.stopPropagation();
+          showFailure(script);
+        });
+        actionCell.appendChild(detailButton);
+        row.addEventListener("click", () => showFailure(script));
+      }
+
+      row.appendChild(actionCell);
+      return row;
+    }
+
+    function fetchStatus() {
+      fetch("/status")
+        .then(res => res.json())
+        .then(data => {
+          statusTable.innerHTML = "";
+          updateStats(data);
+
+          const entries = Object.entries(data);
+          if (!entries.length) {
+            const row = document.createElement("tr");
+            row.innerHTML = `<td colspan="6" class="empty-state">No scripts configured.</td>`;
+            statusTable.appendChild(row);
+            return;
+          }
+
+          entries.forEach(([script, info]) => {
+            statusTable.appendChild(renderStatusRow(script, info));
+          });
+        });
+    }
+
+    function setButtonBusy(button, label) {
+      if (!button) return;
+      button.dataset.originalText = button.textContent;
+      button.textContent = label;
+      button.disabled = true;
+    }
+
+    function restoreButton(button) {
+      if (!button) return;
+      button.textContent = button.dataset.originalText || "Run";
+      button.disabled = false;
+    }
+
+    function runAll(button) {
+      setButtonBusy(button, "Running");
+      fetch("/run_all", { method: "POST" })
+        .then(fetchStatus)
+        .catch(() => restoreButton(button));
+    }
+
+    function runScript(script, button) {
+      setButtonBusy(button, "Running");
+      fetch("/run_script", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ script })
+      })
+        .then(fetchStatus)
+        .catch(() => restoreButton(button));
+    }
+
+    function showFailure(script) {
+      fetch(`/failure_detail/${encodeURIComponent(script)}`)
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById("failureTitle").textContent = script;
+          document.getElementById("failureText").textContent = `STDOUT:\n${data.stdout}\n\nSTDERR:\n${data.stderr}`;
+          document.getElementById("summaryText").textContent = data.summary || "No explanation available.";
+          document.getElementById("DecisionText").textContent = data.decision || "No decision available.";
+          document.getElementById("ticketText").textContent = data.ticket || "No Jira ticket information available.";
+
+          const img = document.getElementById("failureScreenshot");
+          if (data.screenshot) {
+            img.src = data.screenshot;
+            img.style.display = "block";
+          } else {
+            img.removeAttribute("src");
+            img.style.display = "none";
+          }
+
+          modal.classList.add("is-open");
+          modal.setAttribute("aria-hidden", "false");
+        });
+    }
+
+    function closeModal() {
+      modal.classList.remove("is-open");
+      modal.setAttribute("aria-hidden", "true");
+    }
+
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") closeModal();
+    });
+
+    window.onload = () => {
+      fetchStatus();
+      setInterval(fetchStatus, 2000);
+    };
+  </script>
+</body>
+</html>

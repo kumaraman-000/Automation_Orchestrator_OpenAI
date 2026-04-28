@@ -1,0 +1,5 @@
+{
+  "scripts": [
+    "python_orchestrator/Test_case/demo_login_logout.py"
+  ]
+}
